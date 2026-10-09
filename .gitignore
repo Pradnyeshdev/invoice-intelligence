@@ -1,0 +1,46 @@
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+*.db-*
+*.sqlite-*
+*.sqlite3-*
+
+# Uploaded user documents (at any project level)
+uploads/
+**/uploads/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Common build artifacts
+build/
+dist/
+*.egg-info/
+
+# Frontend dependencies and build output
+node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example

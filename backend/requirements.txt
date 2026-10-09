@@ -1,0 +1,8 @@
+# OCR uses the optional local `tesseract` executable (see README); no Python OCR package is required.
+fastapi
+uvicorn
+pydantic
+pytest
+httpx
+python-multipart
+pymupdf
