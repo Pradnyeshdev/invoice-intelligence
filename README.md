@@ -57,6 +57,7 @@ backend/
       invoice_parser.py         Deterministic field parsing
       invoice_validator.py      Deterministic validation
   tests/                        Backend tests with synthetic documents
+  pyproject.toml                Vercel FastAPI entrypoint
   requirements.txt
 frontend/
   src/App.tsx                   Dashboard and invoice views
@@ -64,6 +65,7 @@ frontend/
   src/types.ts                  API response types
   src/styles.css                Responsive styling
   .env.example                  Vite API URL example
+  vercel.json                   SPA route fallback
 .env.example                    Optional backend Tesseract path example
 .gitignore
 README.md
@@ -211,11 +213,31 @@ The tests use generated synthetic documents and temporary SQLite databases. No p
 - Uploaded files and SQLite databases, environment files, virtual environments, caches, and build output are excluded by `.gitignore`.
 - Deleting an invoice only removes the upload associated with that record; arbitrary paths are never accepted by the delete endpoint.
 
-## Deployment preparation and constraints
+## Vercel deployment foundation
 
-The current backend is designed for local use and is **not a drop-in serverless backend**. SQLite and uploaded documents live on local disk, and OCR launches a local Tesseract subprocess. Ephemeral serverless filesystems can lose the database/uploads between instances, and many serverless runtimes do not include or support the required OCR binary.
+The repository includes the minimum project-root configuration for separate Vercel projects. The frontend uses Vite's `dist` output and an SPA fallback in `frontend/vercel.json`. The backend declares its FastAPI app entrypoint in `backend/pyproject.toml`; Vercel's Python runtime supports FastAPI and reads dependencies from `backend/requirements.txt`.
 
-For a future hosted deployment, use a persistent service/container or VM with Tesseract and durable storage mounted for both SQLite and uploads. Configure `TESSERACT_CMD` (if needed), upload limits, CORS origins, backups, and access controls for the host. A static frontend could be hosted separately (including on Vercel) only if it points to a separately hosted backend with persistent storage and Tesseract. This repository does not deploy or configure a hosted service.
+### Required Vercel dashboard settings
+
+Create two Vercel projects from this repository. These settings are entered in each project's **Settings → Build and Deployment** in the Vercel dashboard; no Vercel project or GitHub setting is created by this repository change.
+
+| Project | Root Directory | Framework/build settings |
+| --- | --- | --- |
+| Frontend | `frontend` | Framework preset: Vite. Build command: `npm run build`. Output directory: `dist`. Install command: `npm install` (or the dashboard's detected default). |
+| Backend | `backend` | Framework/runtime: FastAPI on Vercel's Python runtime. Dependency file: `requirements.txt`. Entrypoint: `app.main:app` from `pyproject.toml`. |
+
+Set these values under **Settings → Environment Variables** for the appropriate Production and Preview environments:
+
+| Project | Variable | Value |
+| --- | --- | --- |
+| Frontend | `VITE_API_BASE_URL` | The backend project's full origin, for example `https://invoice-intelligence-api.vercel.app` (no `/api` suffix). Vite embeds this value at build time. |
+| Backend | `CORS_ORIGINS` | Comma-separated exact frontend origins, for example `https://invoice-intelligence.vercel.app`. Do not use `*`. Add each intended preview origin explicitly if browser previews need API access. |
+
+Locally, `VITE_API_BASE_URL` continues to default to `http://localhost:8000`. If `CORS_ORIGINS` is unset, the backend permits only `http://localhost:5173` and `http://127.0.0.1:5173`. The optional local values are shown in the root `.env.example`; the application reads process environment variables and does not automatically load that file.
+
+This is only deployment configuration groundwork; it does **not** make the complete application ready for production on Vercel. The current backend still writes SQLite and invoice uploads to local disk, and the OCR adapter invokes a local Tesseract executable. Those are unchanged in this phase. Vercel's filesystem is not durable between function requests/deployments, the Windows Tesseract path is not a Linux deployment binary, and Vercel Functions have a 4.5 MB request-body limit while this app accepts uploads up to 10 MiB. Therefore database/upload persistence, direct uploads, and Linux Tesseract packaging remain separate phases. Do not use this deployment foundation to process real invoices until those blockers and access controls are addressed.
+
+Vercel currently documents FastAPI support through its Python runtime; consult its [FastAPI deployment guide](https://vercel.com/docs/frameworks/backend/fastapi) and [Python runtime documentation](https://vercel.com/docs/functions/runtimes/python) for current runtime status and supported Python versions. This repository does not deploy a Vercel project.
 
 ## Limitations and future improvements
 

@@ -1,9 +1,10 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import File, HTTPException, Response, UploadFile
 
 from app import database
-from app.repositories import invoices as invoice_repository
 from app.repositories.invoices import DuplicateInvoiceError
 from app.schemas import (
     ExtractedDocumentTextResponse,
@@ -20,12 +21,33 @@ from app.services.document_extractor import (
 from app.services.invoice_parser import parse_invoice_text
 from app.services.invoice_validator import validate_invoice
 from app.services.uploads import UploadError, delete_uploaded_file, save_invoice_upload
+from app.storage.config import get_storage_backend
 
 app = FastAPI(title="Invoice Intelligence API")
 
+invoice_repository, _document_store = get_storage_backend()
+
+
+LOCAL_DEVELOPMENT_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+
+def configured_cors_origins(value: str | None) -> list[str]:
+    """Return explicit CORS origins, defaulting to local Vite development."""
+    if value is None:
+        return LOCAL_DEVELOPMENT_ORIGINS.copy()
+
+    origins = list(dict.fromkeys(origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()))
+    if "*" in origins:
+        raise ValueError("CORS_ORIGINS must contain explicit origins, not '*'.")
+    return origins
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=configured_cors_origins(os.getenv("CORS_ORIGINS")),
     allow_methods=["*"],
     allow_headers=["*"],
 )

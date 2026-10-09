@@ -4,8 +4,9 @@ from pathlib import Path
 import pymupdf as fitz
 
 from app.schemas import ExtractedDocumentTextResponse
-from app.services import uploads
 from app.services import ocr
+from app.services import uploads
+from app.storage.config import get_storage_backend
 
 UPLOAD_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 
@@ -20,11 +21,10 @@ def _find_upload(upload_id: str) -> tuple[Path, str]:
     if not UPLOAD_ID_PATTERN.fullmatch(upload_id):
         raise DocumentExtractionError("Uploaded document was not found.", 404)
 
-    for extension in (".pdf", ".png", ".jpg"):
-        candidate = uploads.UPLOADS_DIR / f"{upload_id}{extension}"
-        if candidate.is_file():
-            return candidate, extension
-    raise DocumentExtractionError("Uploaded document was not found.", 404)
+    found = get_storage_backend()[1].find_upload(upload_id)
+    if found is None:
+        raise DocumentExtractionError("Uploaded document was not found.", 404)
+    return found
 
 
 def _extract_pdf_pages(path: Path, *, run_ocr: bool = False) -> list[str]:

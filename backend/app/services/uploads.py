@@ -1,10 +1,11 @@
 from pathlib import Path
 import re
+from typing import AsyncIterator
 from uuid import uuid4
 
 from fastapi import UploadFile
 
-from app.repositories import invoices as invoice_repository
+from app.storage.config import get_storage_backend
 
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
 UPLOADS_DIR = Path(__file__).resolve().parents[2] / "uploads"
@@ -16,6 +17,48 @@ class UploadError(Exception):
     def __init__(self, message: str, status_code: int = 400) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+class LocalUploadedDocumentStore:
+    """Filesystem implementation of the uploaded-document storage contract."""
+
+    async def save_upload(
+        self, upload_id: str, extension: str, chunks: AsyncIterator[bytes]
+    ) -> int:
+        destination = UPLOADS_DIR / f"{upload_id}{extension}"
+        UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+        size = 0
+        try:
+            with destination.open("xb") as saved_file:
+                async for chunk in chunks:
+                    size += len(chunk)
+                    saved_file.write(chunk)
+        except Exception:
+            destination.unlink(missing_ok=True)
+            raise
+        return size
+
+    def find_upload(self, upload_id: str) -> tuple[Path, str] | None:
+        if not UPLOAD_ID_PATTERN.fullmatch(upload_id):
+            return None
+        for extension in (".pdf", ".png", ".jpg"):
+            candidate = UPLOADS_DIR / f"{upload_id}{extension}"
+            if candidate.is_file():
+                return candidate, extension
+        return None
+
+    def delete_upload(self, upload_id: str) -> None:
+        """Delete only generated upload names for a validated upload ID."""
+        if not UPLOAD_ID_PATTERN.fullmatch(upload_id):
+            return
+        try:
+            for extension in (".pdf", ".png", ".jpg"):
+                (UPLOADS_DIR / f"{upload_id}{extension}").unlink(missing_ok=True)
+        except OSError:
+            raise UploadError(
+                "The invoice record was deleted, but its uploaded file could not be removed.",
+                status_code=503,
+            ) from None
 
 
 def _safe_original_name(filename: str | None) -> str:
@@ -51,28 +94,26 @@ async def save_invoice_upload(file: UploadFile) -> dict[str, str | int]:
     if extension not in matching_extensions:
         raise UploadError("File extension does not match its contents.")
 
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     upload_id = uuid4().hex
-    destination = UPLOADS_DIR / f"{upload_id}{generated_extension}"
     size = 0
-    with destination.open("xb") as saved_file:
-        try:
-            chunk = first_chunk
-            while chunk:
-                size += len(chunk)
-                if size > MAX_UPLOAD_SIZE:
-                    raise UploadError("File exceeds the 10 MB maximum size.", status_code=413)
-                saved_file.write(chunk)
-                chunk = await file.read(CHUNK_SIZE)
-        except Exception:
-            saved_file.close()
-            destination.unlink(missing_ok=True)
-            raise
+
+    async def validated_chunks() -> AsyncIterator[bytes]:
+        nonlocal size
+        chunk = first_chunk
+        while chunk:
+            size += len(chunk)
+            if size > MAX_UPLOAD_SIZE:
+                raise UploadError("File exceeds the 10 MB maximum size.", status_code=413)
+            yield chunk
+            chunk = await file.read(CHUNK_SIZE)
+
+    invoice_repository, document_store = get_storage_backend()
+    await document_store.save_upload(upload_id, generated_extension, validated_chunks())
 
     try:
         invoice_repository.save_upload_metadata(upload_id, original_name)
     except Exception:
-        destination.unlink(missing_ok=True)
+        document_store.delete_upload(upload_id)
         raise
 
     return {
@@ -85,15 +126,4 @@ async def save_invoice_upload(file: UploadFile) -> dict[str, str | int]:
 
 
 def delete_uploaded_file(upload_id: str) -> None:
-    """Delete only generated upload names for a validated upload ID."""
-    if not UPLOAD_ID_PATTERN.fullmatch(upload_id):
-        return
-    for extension in (".pdf", ".png", ".jpg"):
-        path = UPLOADS_DIR / f"{upload_id}{extension}"
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            raise UploadError(
-                "The invoice record was deleted, but its uploaded file could not be removed.",
-                status_code=503,
-            ) from None
+    get_storage_backend()[1].delete_upload(upload_id)

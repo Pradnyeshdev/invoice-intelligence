@@ -1,5 +1,6 @@
 import type { ApiError, InvoiceRecord, InvoiceUploadResponse } from './types'
 
+// Vite embeds VITE_API_BASE_URL at build time; keep local API as the dev default.
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
